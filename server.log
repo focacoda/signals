@@ -1,0 +1,51 @@
+INFO:     Started server process [608]
+INFO:     Waiting for application startup.
+12:21:47 INFO    app        Motor iniciado: 24 ativos, varredura a cada 5s
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+12:21:47 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:21:48 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT "HTTP/1.1 200 OK"
+12:21:48 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:21:48 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT "HTTP/1.1 200 OK"
+12:21:48 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=SOLUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:21:49 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT "HTTP/1.1 200 OK"
+12:21:49 INFO    scanner    Sinal #159 SOLUSD call conf=94
+12:21:49 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=BNBUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:21:49 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT "HTTP/1.1 200 OK"
+12:21:50 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:21:50 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT "HTTP/1.1 200 OK"
+12:21:50 INFO    scanner    Sinal #160 XRPUSD call conf=64
+12:21:50 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=DOGEUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:21:50 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=DOGEUSDT "HTTP/1.1 200 OK"
+12:21:50 INFO    scanner    Sinal #161 DOGEUSD call conf=98
+12:21:56 INFO    scanner    Sinal #162 EURUSD_OTC call conf=99
+12:22:09 INFO    scanner    Sinal #163 USDJPY_OTC call conf=74
+12:22:30 INFO    scanner    Sinal #164 NZDUSD_OTC put conf=100
+12:22:43 INFO    scanner    Sinal #165 GBPJPY_OTC put conf=81
+12:22:56 INFO    scanner    Sinal #166 XAGUSD_OTC call conf=81
+INFO:     127.0.0.1:57326 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49733 - "GET /api/health HTTP/1.1" 200 OK
+12:22:56 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT "HTTP/1.1 200 OK"
+12:22:57 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=DOGEUSDT "HTTP/1.1 200 OK"
+12:22:57 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT "HTTP/1.1 200 OK"
+12:22:57 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT "HTTP/1.1 200 OK"
+12:22:58 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT "HTTP/1.1 200 OK"
+12:22:58 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT "HTTP/1.1 200 OK"
+12:22:58 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT "HTTP/1.1 200 OK"
+12:22:58 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT "HTTP/1.1 200 OK"
+12:22:59 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=DOGEUSDT "HTTP/1.1 200 OK"
+12:22:59 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:53293 - "GET /api/health HTTP/1.1" 200 OK
+12:23:00 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:23:00 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT "HTTP/1.1 200 OK"
+12:23:00 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:23:01 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT "HTTP/1.1 200 OK"
+12:23:01 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=SOLUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:23:01 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT "HTTP/1.1 200 OK"
+12:23:02 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=BNBUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:23:02 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT "HTTP/1.1 200 OK"
+12:23:02 INFO    scanner    Sinal #167 BNBUSD call conf=100
+12:23:02 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=XRPUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:23:02 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT "HTTP/1.1 200 OK"
+12:23:03 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=DOGEUSDT&interval=1m&limit=120 "HTTP/1.1 200 OK"
+12:23:03 INFO    httpx      HTTP Request: GET https://api.binance.com/api/v3/ticker/price?symbol=DOGEUSDT "HTTP/1.1 200 OK"
