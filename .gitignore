@@ -53,3 +53,7 @@ Thumbs.db
 
 # Claude
 .claude/
+# Segredos
+.env
+.env.*
+!.env.example

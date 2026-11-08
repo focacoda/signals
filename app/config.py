@@ -10,12 +10,38 @@ DATA_DIR.mkdir(exist_ok=True)
 
 DB_PATH = DATA_DIR / "signals.db"
 
+
+def _load_env(path: Path) -> None:
+    """Le .env no formato CHAVE=valor, sem dependencia externa.
+
+    Variaveis ja definidas no ambiente tem prioridade, para que producao
+    possa sobrescrever o arquivo sem edita-lo.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env(BASE_DIR / ".env")
+
 # --- IQ Option ---
 # A API publica/privada da IQ Option nao tem documentacao oficial. O conector
 # tenta autenticar; sem credenciais ou se a conexao falhar, ele cai para o
 # feed publico e o dashboard mostra a fonte real usada em cada ativo.
 IQ_EMAIL = os.getenv("IQ_EMAIL", "")
 IQ_PASSWORD = os.getenv("IQ_PASSWORD", "")
+# SSID: token de sessao do navegador ja logado. Quando presente, dispensa o
+# login HTTP -- util quando auth.iqoption.com esta bloqueado na rede mas o
+# websocket (ws.iqoption.com) continua acessivel.
+IQ_SSID = os.getenv("IQ_SSID", "")
 IQ_ENABLED = os.getenv("IQ_ENABLED", "1") == "1"
 
 # --- Motor ---

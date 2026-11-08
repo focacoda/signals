@@ -21,13 +21,13 @@ import time
 
 import httpx
 
-from ..config import IQ_EMAIL, IQ_ENABLED, IQ_PASSWORD
+from ..config import IQ_EMAIL, IQ_ENABLED, IQ_PASSWORD, IQ_SSID
 from ..engine.strategy import Candle
 from .base import Asset
 
 log = logging.getLogger("iq")
 
-WS_URL = "wss://api-iqoption.com/echo/websocket"
+WS_URL = "wss://ws.iqoption.com/echo/websocket"
 LOGIN_URL = "https://auth.iqoption.com/api/v2/login"
 
 # Ativos da IQ que mapeiam para os simbolos canonicos do sistema.
@@ -46,7 +46,8 @@ class IQFeed:
 
     def __init__(self) -> None:
         self.available = False
-        self.configured = bool(IQ_ENABLED and IQ_EMAIL and IQ_PASSWORD)
+        self.configured = bool(
+            IQ_ENABLED and ((IQ_EMAIL and IQ_PASSWORD) or IQ_SSID))
         self._client = httpx.AsyncClient(timeout=15.0)
         self._ws = None
         self._reader: asyncio.Task | None = None
@@ -59,19 +60,22 @@ class IQFeed:
 
     async def _connect(self) -> bool:
         if not self.configured:
-            self._last_error = ("Credenciais ausentes: defina IQ_EMAIL e "
-                                "IQ_PASSWORD para usar a conta IQ Option.")
+            self._last_error = ("Credenciais ausentes: defina IQ_SSID (recomendado) "
+                                "ou IQ_EMAIL + IQ_PASSWORD.")
             return False
         try:
-            r = await self._client.post(
-                LOGIN_URL,
-                json={"identifier": IQ_EMAIL, "password": IQ_PASSWORD},
-            )
-            if r.status_code != 200:
-                self._last_error = f"Login recusado (HTTP {r.status_code})"
-                log.warning(self._last_error)
-                return False
-            token = r.json().get("data", {}).get("token") or r.json().get("token")
+            token = IQ_SSID
+            if not token:
+                r = await self._client.post(
+                    LOGIN_URL,
+                    json={"identifier": IQ_EMAIL, "password": IQ_PASSWORD},
+                )
+                if r.status_code != 200:
+                    self._last_error = f"Login recusado (HTTP {r.status_code})"
+                    log.warning(self._last_error)
+                    return False
+                body = r.json()
+                token = body.get("data", {}).get("token") or body.get("token")
             if not token:
                 self._last_error = "Login sem token na resposta"
                 return False
@@ -133,7 +137,9 @@ class IQFeed:
                 await self._ws.send(json.dumps({
                     "name": "subscribeMessage",
                     "msg": {"name": "front", "params": {"routingFilters": {
-                        "active_id": aid, "instrument_type": "turbo-option"}}},
+                        "active_id": aid,
+                        "instrument_type": "turbo-option",
+                        "leader_id": aid}}},
                 }))
             except Exception:
                 pass

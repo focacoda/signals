@@ -101,7 +101,7 @@ Ou duplo clique em `consultar.bat`.
 
 | Fonte | Status | Auditável |
 |---|---|---|
-| Binance (cripto) | ativa, dados reais | **sim** |
+| IQ Option (forex + cripto) | ativa, requer login | **sim** |
 | IQ Option (forex) | requer `IQ_EMAIL` e `IQ_PASSWORD` | sim |
 | OTC sintético | ativa, preço gerado por nós | **não** |
 

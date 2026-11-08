@@ -1,8 +1,11 @@
-"""Catalogo de ativos e resolucao de feed por ativo."""
+"""Catalogo de ativos e resolucao de feed por ativo.
+
+Fonte unica: IQ Option. A Binance foi removida; cripto agora tambem vem da
+IQ Option, entao todo ativo do sistema usa a mesma sessao autenticada.
+"""
 from __future__ import annotations
 
 from .base import Asset, Feed
-from .binance import BinanceFeed
 from .iq import IQFeed
 from .otc_sim import OTCSimFeed
 
@@ -10,15 +13,13 @@ from .otc_sim import OTCSimFeed
 def default_assets() -> list[Asset]:
     assets: list[Asset] = []
 
-    # Cripto: dados reais publicos, resultado auditavel por terceiro
+    # Cripto: somente os ativos que a IQ Option assina de fato
     for sym, name in [
-        ("BTCUSDT", "Bitcoin"), ("ETHUSDT", "Ethereum"),
-        ("SOLUSDT", "Solana"), ("BNBUSDT", "BNB"),
-        ("XRPUSDT", "XRP"), ("DOGEUSDT", "Dogecoin"),
+        ("BTCUSD", "Bitcoin"), ("ETHUSD", "Ethereum"),
     ]:
         assets.append(Asset(
-            symbol=sym.replace("USDT", "USD"), name=name, market="crypto",
-            source="binance", canonical=sym, payout=87, verified=True))
+            symbol=sym, name=name, market="crypto",
+            source="iq", canonical=sym, payout=87, verified=True))
 
     # Forex: pela IQ Option quando configurada, senao fora do radar
     for sym, name in [
@@ -53,11 +54,9 @@ def default_assets() -> list[Asset]:
 
 class FeedRegistry:
     def __init__(self) -> None:
-        self.binance = BinanceFeed()
         self.iq = IQFeed()
         self.otc = OTCSimFeed()
         self._by_name: dict[str, Feed] = {
-            "binance": self.binance,
             "iq": self.iq,
             "sim_otc": self.otc,
         }
@@ -67,13 +66,10 @@ class FeedRegistry:
 
     def status(self) -> dict:
         return {
-            "binance": {"available": self.binance.available,
-                        "configured": True},
             "iq": self.iq.status(),
             "sim_otc": {"available": True, "configured": True},
         }
 
     async def close(self) -> None:
-        await self.binance.close()
         await self.iq.close()
         await self.otc.close()
