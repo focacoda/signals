@@ -41,7 +41,6 @@ IQ_PASSWORD = os.getenv("IQ_PASSWORD", "")
 # SSID: token de sessao do navegador ja logado. Quando presente, dispensa o
 # login HTTP -- util quando auth.iqoption.com esta bloqueado na rede mas o
 # websocket (ws.iqoption.com) continua acessivel.
-IQ_SSID = os.getenv("IQ_SSID", "")
 IQ_ENABLED = os.getenv("IQ_ENABLED", "1") == "1"
 
 # --- Motor ---

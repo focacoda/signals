@@ -1,0 +1,16 @@
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.vscode/
+/.vs
+venv/
+.idea
+test.py
+.venv/
+.env
+
+# relatorios e historicos locais
+.coverage
+coverage.xml
+.gdb_history
