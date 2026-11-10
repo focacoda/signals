@@ -10,6 +10,28 @@ const el = (tag, cls, txt) => {
 const num = (v, d = 5) => (v === null || v === undefined) ? '—'
   : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: d });
 
+// Tempo restante legivel. Negativo vira "agora".
+const fmtSec = (seconds) => {
+  if (seconds === null || seconds === undefined) return '—';
+  if (seconds <= 0) return 'agora';
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m > 0 ? `${m}m${String(s).padStart(2, '0')}s` : `${s}s`;
+};
+
+// Horario de abertura/fechamento de um sinal, no fuso local.
+const hhmm = (ts) => ts == null ? '—'
+  : new Date(ts * 1000).toLocaleTimeString('pt-BR',
+    { hour: '2-digit', minute: '2-digit' });
+
+// Quanto falta para a janela de emissao abrir. Positivo = esperando;
+// <= 0 = dentro da janela (o sinal pode sair a qualquer instante).
+const formatCountdown = (seconds, window) => {
+  if (seconds === null || seconds === undefined) return '—';
+  if (seconds <= 0) return `janela aberta (${window}s)`;
+  return 'em ' + fmtSec(seconds);
+};
+
 const state = {
   snapshot: null,
   recent: [],
@@ -46,8 +68,13 @@ function connect() {
     if (msg.type === 'tick') {
       state.snapshot = msg.data;
       renderLive();
+    } else if (msg.type === 'alert') {
+      const a = msg.data;
+      toast(`Alerta: ${a.symbol} M${a.expiry_min} `
+        + `${a.direction.toUpperCase()} — abre em ${fmtSec(a.boundary_ts - Date.now() / 1000)}`);
     } else if (msg.type === 'signal') {
-      toast(`Novo sinal: ${msg.data.symbol} ${msg.data.direction.toUpperCase()}`);
+      toast(`Aberto: ${msg.data.symbol} M${msg.data.expiry_min} `
+        + `${msg.data.direction.toUpperCase()}`);
       loadRecent();
     } else if (msg.type === 'settled') {
       const r = msg.data.result;
@@ -73,11 +100,14 @@ function renderBands(s) {
   const bar = $('#bandBar');
   const bands = s.confidence_bands || [];
   if (!bands.length) { bar.innerHTML = ''; return; }
+  const windows = s.emit_windows || {};
   const nomes = { 1: 'M1', 5: 'M5', 15: 'M15' };
   bar.innerHTML = '<span class="lbl">Regra de emissão:</span>' +
     bands.map((b) => {
       const label = nomes[b.expiry_min] || b.expiry_min + 'm';
-      return `<span class="band">${label} só acima de <b>${b.above}%</b></span>`;
+      const w = windows[b.expiry_min];
+      const janela = w ? ` · últimos ${w}s` : '';
+      return `<span class="band">${label} só acima de <b>${b.above}%</b>${janela}</span>`;
     }).join('') +
     '<span class="lbl" style="margin-left:auto">abaixo disso não emite</span>';
 }
@@ -122,19 +152,30 @@ function renderLive() {
     return;
   }
 
-  const bands = s.confidence_bands || [];
-  function eligibleExpiry(conf) {
-    for (const b of bands) {
-      if (conf >= b.above) return b.expiry_min;
-    }
-    return null;
+  const bands = (s.confidence_bands || []).slice()
+    .sort((a, b) => a.expiry_min - b.expiry_min);
+  const expiries = bands.map((b) => b.expiry_min);
+  const bandByExp = {};
+  bands.forEach((b) => { bandByExp[b.expiry_min] = b.above; });
+  const label = (m) => 'M' + m;
+
+  // Limiar de confianca por vencimento, vindo direto do servidor.
+  function minConfFor(exp) {
+    return bandByExp[exp] ?? 80;
   }
 
+  // A avaliacao e por (ativo, prazo): cada vencimento tem seu proprio
+  // recorte de velas. Mostra uma linha por prazo que passou no limiar.
   list.forEach((a) => {
-    const as = s.assessments[a.symbol];
-    const dir = as?.direction || 'flat';
-    const conf = as?.confidence ?? 0;
-    if (dir === 'flat' || eligibleExpiry(conf) === null) return;
+    const rows = expiries
+      .map((exp) => ({ exp, as: s.assessments[a.symbol + ':' + exp] }))
+      .filter((x) => x.as && x.as.direction !== 'flat'
+        && x.as.confidence >= minConfFor(x.exp));
+    if (!rows.length) return;
+
+    const best = rows.reduce((m, r) =>
+      (r.as.confidence > m.as.confidence ? r : m), rows[0]);
+    const dir = best.as.direction;
     const px = s.prices[a.symbol];
     const card = el('div', 'asset ' + dir);
     const r1 = el('div', 'row1');
@@ -142,17 +183,39 @@ function renderLive() {
     card.append(r1);
     card.append(el('div', 'name', a.name));
 
-    const dl = el('div', 'dirline');
-    dl.append(el('span', 'dir ' + dir,
-      dir === 'call' ? '▲ CALL' : dir === 'put' ? '▼ PUT' : '· neutro'));
-    dl.append(el('span', 'meta', conf + '% confiança'));
-    card.append(dl);
+    // uma linha por prazo, com a fase do ciclo e o tempo ate o proximo passo
+    rows.forEach(({ exp, as }) => {
+      const dl = el('div', 'dirline');
+      dl.append(el('span', 'dir ' + as.direction,
+        as.direction === 'call' ? '▲ CALL' : '▼ PUT'));
 
-    const bar = el('div', 'bar');
-    const fill = el('i');
-    fill.style.width = Math.min(100, conf) + '%';
-    bar.append(fill);
-    card.append(bar);
+      const alerta = (s.alerts || {})[a.symbol + ':' + exp];
+      let estado;
+      if (alerta) {
+        estado = 'ALERTA · abre na virada em '
+          + fmtSec(alerta.seconds_to_open);
+      } else if (as.phase === 'alerta') {
+        estado = 'confirmando… ' + fmtSec(as.seconds_to_close) + ' p/ fechar';
+      } else if (as.phase === 'medindo') {
+        estado = 'medindo · alerta em '
+          + fmtSec(as.seconds_to_close - (s.alert_window ?? 20));
+      } else {
+        const ateMedir = as.seconds_to_close - (s.measure_window ?? 60);
+        estado = ateMedir > 0
+          ? 'mede em ' + fmtSec(ateMedir)
+          : 'aguardando janela';
+      }
+      dl.append(el('span', 'meta',
+        label(exp) + ' · ' + as.confidence + '% · ' + estado));
+      if (alerta) dl.classList.add('hot');
+      card.append(dl);
+
+      const bar = el('div', 'bar');
+      const fill = el('i');
+      fill.style.width = Math.min(100, as.confidence) + '%';
+      bar.append(fill);
+      card.append(bar);
+    });
 
     const bd = el('div', 'badges');
     bd.append(el('span', 'badge', a.market));
@@ -161,9 +224,9 @@ function renderLive() {
       a.verified ? 'auditável' : 'não auditável'));
     card.append(bd);
 
-    if (as?.reasons?.length) {
+    if (best.as.reasons?.length) {
       const ul = el('ul', 'reasons');
-      as.reasons.slice(0, 3).forEach((r) => ul.append(el('li', '', r)));
+      best.as.reasons.slice(0, 3).forEach((r) => ul.append(el('li', '', r)));
       card.append(ul);
     }
     grid.append(card);
@@ -194,11 +257,18 @@ function signalCard(sg) {
   }
   c.append(dl);
 
-  const m = el('div', 'meta');
-  m.textContent = `Entrada ${num(sg.entry_price, 6)}` +
-    (sg.exit_price ? ` → saída ${num(sg.exit_price, 6)}` : '') +
-    ` · ${sg.source}` + (sg.verified ? '' : ' · não auditável');
+  // O que importa numa binaria e a janela de tempo, nao o preco: entrada
+  // 10:05, fechamento 10:10. O preco fica como detalhe secundario.
+  const m = el('div', 'meta strong');
+  m.textContent = `Entrada ${hhmm(sg.opened_at)} → fechamento `
+    + hhmm(sg.expires_at);
   c.append(m);
+
+  const det = el('div', 'meta');
+  det.textContent = `${sg.expiry_min} min · entrada ${num(sg.entry_price, 6)}`
+    + (sg.exit_price ? ` → saída ${num(sg.exit_price, 6)}` : '')
+    + ` · ${sg.source}` + (sg.verified ? '' : ' · não auditável');
+  c.append(det);
 
   if (sg.expires_at && !sg.result) {
     const left = el('div', 'meta');
@@ -219,7 +289,6 @@ function minConfForExpiry(expiryMin) {
   for (const b of bands) {
     if (b.expiry_min === expiryMin) return b.above;
   }
-  if (expiryMin <= 1) return 95;
   return 80;
 }
 
@@ -274,18 +343,18 @@ async function loadHistory() {
     return;
   }
   const t = el('table');
-  t.innerHTML = '<thead><tr><th>#</th><th>Ativo</th><th>Hora</th>' +
-    '<th>Direção</th><th>Exp</th><th>Conf</th><th>Entrada</th>' +
-    '<th>Saída</th><th>Resultado</th><th>Fonte</th></tr></thead>';
+  t.innerHTML = '<thead><tr><th>#</th><th>Ativo</th><th>Data</th>' +
+    '<th>Direção</th><th>Exp</th><th>Conf</th><th>Abertura</th>' +
+    '<th>Fechamento</th><th>Resultado</th><th>Fonte</th></tr></thead>';
   const tb = el('tbody');
   j.signals.forEach((s) => {
     const tr = el('tr');
     tr.innerHTML =
       `<td>${s.id}</td><td>${s.symbol}</td>` +
-      `<td>${new Date(s.opened_at * 1000).toLocaleString('pt-BR')}</td>` +
+      `<td>${new Date(s.opened_at * 1000).toLocaleDateString('pt-BR')}</td>` +
       `<td><span class="pill ${s.direction}">${s.direction.toUpperCase()}</span></td>` +
       `<td>${s.expiry_min}m</td><td>${s.confidence}%</td>` +
-      `<td>${num(s.entry_price, 6)}</td><td>${s.exit_price ? num(s.exit_price, 6) : '—'}</td>` +
+      `<td>${hhmm(s.opened_at)}</td><td>${hhmm(s.expires_at)}</td>` +
       `<td>${s.result ? `<span class="pill ${s.result}">${s.result.toUpperCase()}</span>` :
         '<span class="pill open">ABERTO</span>'}</td>` +
       `<td>${s.source}${s.verified ? '' : ' ⚠'}</td>`;
@@ -337,82 +406,6 @@ async function loadStats() {
   bm.append(t);
 }
 
-// ---------- backtest ----------
-function fillSymbolSelect() {
-  const sel = $('#btSymbol');
-  if (sel.options.length) return;
-  fetch('/api/assets').then((r) => r.json()).then((j) => {
-    j.assets.forEach((a) => {
-      const o = el('option', '', a.symbol);
-      o.value = a.symbol;
-      sel.append(o);
-    });
-  });
-}
-fillSymbolSelect();
-
-$('#backtestForm').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const out = $('#backtestOut');
-  out.innerHTML = '<div class="empty">Rodando…</div>';
-  const body = {
-    symbol: $('#btSymbol').value,
-    expiry_min: +$('#btExpiry').value,
-    min_confidence: +$('#btConf').value,
-    payout_pct: +$('#btPayout').value,
-    bars: +$('#btBars').value,
-  };
-  const res = await fetch('/api/backtest', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    out.innerHTML = `<div class="empty">${err.detail || 'Falha no backtest'}</div>`;
-    return;
-  }
-  const j = await res.json();
-  const warn = j.win_rate <= (j.break_even_win_rate ?? 100)
-    ? `<div class="warnbox">Taxa de acerto (${j.win_rate}%) abaixo ou igual ao
-       ponto de equilíbrio do payout (${j.break_even_win_rate}%).
-       Nesta configuração a estratégia perde dinheiro.</div>` : '';
-  out.innerHTML = `
-    ${warn}
-    <div class="kpis">
-      <div class="kpi"><div class="k">Operações</div><div class="v">${j.count}</div>
-        <div class="s">${j.wins}W / ${j.losses}L / ${j.ties}E</div></div>
-      <div class="kpi"><div class="k">Taxa de acerto</div><div class="v">${j.win_rate}%</div>
-        <div class="s">equilíbrio: ${j.break_even_win_rate}%</div></div>
-      <div class="kpi"><div class="k">Retorno acumulado</div><div class="v">${j.total_return_pct}%</div>
-        <div class="s">stake fixo</div></div>
-      <div class="kpi"><div class="k">Drawdown máximo</div><div class="v">${j.max_drawdown_pct}%</div>
-        <div class="s">pior sequência</div></div>
-    </div>
-    <div class="panel"><h3>Curva de capital (% sobre stake fixo)</h3>
-      ${spark(j.equity_curve)}</div>
-    <div class="panel"><h3>${j.symbol} · ${j.candles} barras de 1 min · fonte ${j.source}</h3>
-      <div class="muted">${j.disclaimer}</div></div>`;
-});
-
-function spark(curve) {
-  if (!curve || curve.length < 2) return '<div class="muted">sem trades</div>';
-  const w = 900, h = 160, pad = 6;
-  const min = Math.min(0, ...curve), max = Math.max(0, ...curve);
-  const span = max - min || 1;
-  const pts = curve.map((v, i) => {
-    const x = pad + (i / (curve.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((v - min) / span) * (h - pad * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const zeroY = h - pad - ((0 - min) / span) * (h - pad * 2);
-  const up = curve[curve.length - 1] >= 0;
-  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:160px">
-    <line x1="0" y1="${zeroY}" x2="${w}" y2="${zeroY}" stroke="#232b3d" stroke-width="1"/>
-    <polyline points="${pts}" fill="none"
-      stroke="${up ? '#2ecc8f' : '#ef5b6b'}" stroke-width="2"/></svg>`;
-}
-
 // ---------- calculadoras ----------
 const toolRoutes = {
   staking: { url: '/api/binary-staking', method: 'GET' },
@@ -455,7 +448,6 @@ const endpoints = [
   ['GET', '/api/signals?limit=50&symbol=', 'sinais recentes'],
   ['GET', '/api/signals/open', 'sinais ainda abertos'],
   ['GET', '/api/stats?market=', 'track record auditável'],
-  ['POST', '/api/backtest', 'replay da estratégia'],
   ['GET', '/api/pip-value', 'valor do pip'],
   ['GET', '/api/binary-staking', 'stake e ponto de equilíbrio'],
   ['GET', '/api/drawdown-recovery', 'recuperação de drawdown'],

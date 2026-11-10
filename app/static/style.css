@@ -148,6 +148,14 @@ h2.sec { font-size: 13px; text-transform: uppercase; letter-spacing: .8px;
 .pill.open { background: rgba(76, 141, 255, .14); color: var(--accent); }
 
 .card .meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Horario de abertura -> fechamento: e a informacao principal do card */
+.card .meta.strong {
+  font-size: 13px; color: var(--text, #e8edf5); font-weight: 600;
+  margin-top: 4px;
+}
+/* Contagem de uma confluencia ja medida ou confirmada */
+.asset .dirline.hot .meta { color: var(--accent); font-weight: 600; }
+.asset .dirline.hot { background: rgba(76, 141, 255, .08); border-radius: 6px; padding: 2px 6px; }
 .card ul.reasons { margin: 8px 0 0; padding-left: 16px; font-size: 11px; color: var(--muted); }
 .card ul.reasons li { margin-bottom: 2px; }
 
@@ -189,11 +197,6 @@ pre.out {
   background: rgba(76, 141, 255, .07); border: 1px solid #1f3358;
   border-radius: 9px; padding: 12px 14px; font-size: 12.5px; color: #b9c6dd;
   margin-top: 16px;
-}
-.warnbox {
-  background: rgba(240, 180, 41, .07); border: 1px solid #4c3b1d;
-  border-radius: 9px; padding: 12px 14px; font-size: 12.5px; color: #e8cf9a;
-  margin-bottom: 16px;
 }
 a { color: var(--accent); }
 ul.endpoints { font-size: 12.5px; line-height: 1.9; padding-left: 18px; }

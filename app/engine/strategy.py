@@ -43,13 +43,17 @@ MIN_CANDLES = 40
 
 
 def evaluate(candles: list[Candle]) -> Assessment | None:
-    """Avalia a serie. Retorna None se nao houver dados suficientes."""
-    if len(candles) < MIN_CANDLES:
+    """Avalia a serie. Retorna None se nao houver dados suficientes.
+
+    Usa apenas velas fechadas (candles[:-1]) para prever o proximo candle.
+    """
+    if len(candles) < MIN_CANDLES + 1:
         return None
 
-    closes = [c.close for c in candles]
-    highs = [c.high for c in candles]
-    lows = [c.low for c in candles]
+    closed = candles[:-1]
+    closes = [c.close for c in closed]
+    highs = [c.high for c in closed]
+    lows = [c.low for c in closed]
 
     last = closes[-1]
     if last <= 0:

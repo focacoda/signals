@@ -148,22 +148,39 @@ def open_signals_count() -> int:
     return row["n"] if row else 0
 
 
-def has_open_signal(symbol: str) -> bool:
-    """Verifica se ja existe um sinal aberto para o ativo informado."""
+def has_open_signal(symbol: str, expiry_min: int | None = None) -> bool:
+    """Ha sinal aberto para o ativo.
+
+    Com `expiry_min`, a pergunta e por prazo: um M15 em aberto nao impede
+    um M5, porque sao operacoes distintas no mesmo ativo. Sem ele, olha
+    qualquer prazo.
+    """
     c = _conn()
-    row = c.execute(
-        "SELECT COUNT(*) n FROM signals WHERE symbol=? AND status='open'",
-        (symbol,)).fetchone()
+    if expiry_min is None:
+        row = c.execute(
+            "SELECT COUNT(*) n FROM signals WHERE symbol=? AND status='open'",
+            (symbol,)).fetchone()
+    else:
+        row = c.execute(
+            "SELECT COUNT(*) n FROM signals WHERE symbol=? AND status='open' "
+            "AND expiry_min=?", (symbol, int(expiry_min))).fetchone()
     return row["n"] > 0 if row else False
 
 
-def stats(symbol: str | None = None, market: str | None = None) -> dict:
+def stats(symbol: str | None = None, market: str | None = None,
+          expiry_min: int | None = None,
+          expiries: list[int] | None = None) -> dict:
     """Estatisticas calculadas a partir de tudo que foi registrado.
 
     Nao ha filtro de "melhores operacoes": perdas entram obrigatoriamente.
     Tie (empate no preco de vencimento) e contabilizado separado e nao entra
     no denominador da taxa de acerto, que e a mesma convencao que o mercado
     usa -- mas o numero de empates sempre e exibido junto.
+
+    `expiries` restringe a prazos operados. Serve para o track record nao
+    ser dominado por prazos que o motor nao emite mais -- hoje o historico
+    de M1 (encerrado) e maior que o de M5 e M15 juntos, e somar tudo daria
+    um numero que nao descreve o que esta sendo operado.
     """
     where = ["status='settled'"]
     args: list[Any] = []
@@ -173,6 +190,12 @@ def stats(symbol: str | None = None, market: str | None = None) -> dict:
     if market:
         where.append("market=?")
         args.append(market)
+    if expiry_min is not None:
+        where.append("expiry_min=?")
+        args.append(int(expiry_min))
+    elif expiries:
+        where.append("expiry_min IN (%s)" % ",".join("?" * len(expiries)))
+        args.extend(int(e) for e in expiries)
     clause = " AND ".join(where)
 
     c = _conn()
@@ -207,9 +230,28 @@ def stats(symbol: str | None = None, market: str | None = None) -> dict:
         m["decided"] = d
         m["win_rate"] = round(m["win"] / d * 100, 2) if d else 0.0
 
+    # Quebra por prazo: cada vencimento tem sua propria taxa. Somar prazos
+    # num numero so esconde justamente o que se quer julgar -- se um deles
+    # esta pagando e o outro nao.
+    by_expiry: dict[str, dict] = {}
+    for r in c.execute(
+            f"SELECT expiry_min, result, COUNT(*) n FROM signals "
+            f"WHERE {clause} GROUP BY expiry_min, result",
+            args).fetchall():
+        key = str(r["expiry_min"])
+        e = by_expiry.setdefault(
+            key, {"win": 0, "loss": 0, "tie": 0})
+        e[r["result"]] = r["n"]
+    for e in by_expiry.values():
+        d = e["win"] + e["loss"]
+        e["decided"] = d
+        e["settled"] = e["win"] + e["loss"] + e["tie"]
+        e["win_rate"] = round(e["win"] / d * 100, 2) if d else 0.0
+
     return {
         "symbol": symbol,
         "market": market,
+        "expiry_min": expiry_min,
         "settled": total,
         "open": pending,
         "wins": wins,
@@ -218,4 +260,5 @@ def stats(symbol: str | None = None, market: str | None = None) -> dict:
         "decided": decided,
         "win_rate": win_rate,
         "by_market": by_market,
+        "by_expiry": by_expiry,
     }

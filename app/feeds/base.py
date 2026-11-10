@@ -32,7 +32,14 @@ class Feed(Protocol):
     name: str
     available: bool
 
-    async def candles(self, asset: Asset, limit: int = 120) -> list[Candle]:
+    async def candles(self, asset: Asset, limit: int = 120,
+                      timeframe: int = 60) -> list[Candle]:
+        """Velas fechadas no timeframe pedido (segundos).
+
+        O ultimo item pode ser o candle ainda em formacao; quem consome
+        descarta. `timeframe` e o do vencimento: 60 = M1, 300 = M5,
+        900 = M15.
+        """
         ...
 
     async def price(self, asset: Asset) -> float | None:

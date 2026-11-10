@@ -10,6 +10,53 @@ python run.py
 
 Depois abra `http://127.0.0.1:8000`.
 
+## Prazos: M5 e M15
+
+Cada ativo é avaliado **duas vezes por ciclo**, uma por prazo. O prazo define
+o timeframe das velas — não existe analisar M5 e apostar M15:
+
+| Prazo | Velas analisadas | Confiança mínima | Projeta |
+|---|---|---|---|
+| **M5** | 5 minutos | **80%** | o próximo candle de 5 min |
+| **M15** | 15 minutos | **80%** | o próximo candle de 15 min |
+
+O mesmo ativo pode ter sinais válidos nos dois prazos ao mesmo tempo — um M5
+em aberto não bloqueia um M15. O cooldown é por (ativo, prazo) e nunca é
+menor que a duração do candle, para não sair dois sinais do mesmo candle.
+
+> **M1 está desligado.** Em 60 segundos a confluência atual não separa sinal
+> de ruído. A estrutura continua aceitando M1: basta voltar `1: 60` em
+> `TIMEFRAMES`, em `MIN_CONFIDENCE_BY_EXPIRY` e em `EMIT_WINDOW_BY_EXPIRY`
+> quando houver uma estratégia específica para ele.
+
+### Os N segundos de emissão
+
+O sinal só é publicado nos **últimos N segundos** antes do candle fechar.
+Fora dessa janela, a avaliação é calculada e aparece no dashboard (com a
+contagem "entra em …"), mas **nada é emitido**.
+
+| Prazo | Candle | Janela de emissão | Fração do candle |
+|---|---|---|---|
+| **M5** | 300 s | **últimos 20 s** | 7% |
+| **M15** | 900 s | **últimos 30 s** | 3% |
+
+Exemplo concreto em M15: o candle abre em 10h00 e fecha em 10h15. O sinal é
+publicado entre **10h14:30 e 10h15:00**. Se a confluência já estiver acima de
+80% às 10h03, o card mostra "entra em 11m30s" — e só emite quando o relógio
+entrar na janela.
+
+**A confluência é reavaliada dentro da janela.** Não vale a leitura feita 11
+minutos antes: ao entrar nos últimos 30 s, o motor busca as velas de novo e
+recalcula. Se a direção virou ou a confiança caiu abaixo do piso, o sinal não
+sai. Só é publicado o consenso que ainda está de pé no instante da emissão.
+
+Ajustável por variável de ambiente:
+
+```bash
+EMIT_WINDOW_M5=20 EMIT_WINDOW_M15=30
+MIN_CONFIDENCE_M5=80 MIN_CONFIDENCE_M15=80
+```
+
 ## 2. O que olhar primeiro (aba "Ao vivo")
 
 Cada card de ativo mostra:

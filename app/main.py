@@ -1,7 +1,6 @@
 """Servidor FastAPI: dashboard, API REST e WebSocket."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import store
-from .config import CONFIDENCE_BANDS, EXPIRIES, MIN_CONFIDENCE, SCAN_INTERVAL
-from .engine import calc, strategy
+from .config import (CONFIDENCE_BANDS, EMIT_WINDOW_BY_EXPIRY, EXPIRIES,
+                     MIN_CONFIDENCE, SCAN_INTERVAL, TIMEFRAMES)
+from .engine import calc
 from .engine.scanner import STRATEGY_NAME, Scanner
 from .feeds.registry import FeedRegistry
 from .hub import Hub
@@ -66,6 +66,8 @@ async def health() -> dict:
         "scan_interval": SCAN_INTERVAL,
         "min_confidence": MIN_CONFIDENCE,
         "expiries": EXPIRIES,
+        "timeframes": TIMEFRAMES,
+        "emit_windows": EMIT_WINDOW_BY_EXPIRY,
         "confidence_bands": [
             {"above": minimo, "expiry_min": exp}
             for minimo, exp in CONFIDENCE_BANDS
@@ -101,43 +103,20 @@ async def open_signals() -> dict:
 
 
 @app.get("/api/stats")
-async def stats(symbol: str | None = None, market: str | None = None) -> dict:
-    return store.stats(symbol, market)
+async def stats(symbol: str | None = None, market: str | None = None,
+                expiry_min: int | None = None,
+                include_retired: bool = False) -> dict:
+    """Track record.
+
+    Por padrao conta so os prazos que o motor emite hoje. `include_retired`
+    traz de volta o historico de prazos encerrados (M1), que continua no
+    banco mas nao descreve mais o que a plataforma opera.
+    """
+    expiries = None if include_retired else list(EXPIRIES)
+    return store.stats(symbol, market, expiry_min, expiries)
 
 
-# ---------- backtest e calculadoras ----------
-
-class BacktestBody(BaseModel):
-    symbol: str = "BTCUSD"
-    expiry_min: int = Field(5, ge=1, le=60)
-    min_confidence: int = Field(60, ge=1, le=99)
-    payout_pct: float = Field(85.0, gt=0, le=500)
-    bars: int = Field(1000, ge=200, le=5000)
-
-
-@app.post("/api/backtest")
-async def run_backtest(body: BacktestBody) -> dict:
-    asset = scanner.asset_by_symbol(body.symbol.upper())
-    if asset is None:
-        raise HTTPException(404, f"ativo desconhecido: {body.symbol}")
-    feed = registry.for_asset(asset)
-    candles = await feed.candles(asset, body.bars)
-    if not candles or len(candles) < strategy.MIN_CANDLES + body.expiry_min:
-        raise HTTPException(
-            503, f"dados insuficientes para {asset.symbol} "
-                 f"(recebidos {len(candles)} candles)")
-    # O replay e O(n^2) em Python puro. Rodar isso direto no handler async
-    # bloqueia o event loop e congela o WebSocket do dashboard enquanto
-    # calcula. Por isso vai para uma thread.
-    out = await asyncio.to_thread(
-        calc.backtest, candles, body.expiry_min, body.min_confidence,
-        body.payout_pct)
-    out["symbol"] = asset.symbol
-    out["source"] = asset.source
-    out["verified"] = asset.verified
-    out["candles"] = len(candles)
-    return out
-
+# ---------- calculadoras ----------
 
 @app.get("/api/pip-value")
 async def pip_value(pair: str = "EURUSD", lots: float = 1.0,

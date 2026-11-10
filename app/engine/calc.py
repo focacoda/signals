@@ -1,8 +1,5 @@
-"""Calculadoras de risco e backtest. Funcoes puras, sem I/O."""
+"""Calculadoras de risco. Funcoes puras, sem I/O."""
 from __future__ import annotations
-
-from ..engine.strategy import Candle
-from . import strategy
 
 # ---------- calculadoras ----------
 
@@ -138,79 +135,4 @@ def risk_plan(balance: float, daily_dd_pct: float, max_dd_pct: float,
                     "payout: o sistema perde dinheiro no longo prazo."
                     if be and win_rate_pct <= be else
                     "Taxa atual acima do ponto de equilibrio."),
-    }
-
-
-# ---------- backtest ----------
-
-
-def backtest(candles: list[Candle], expiry_min: int = 5,
-             min_confidence: int = 60, payout_pct: float = 85.0) -> dict:
-    """Replay da estrategia sobre a serie, sem lookahead.
-
-    Em cada barra i, a avaliacao usa candles[:i+1] -- nada do futuro. A
-    entrada e o fechamento da barra i; o resultado vem do fechamento em
-    i + expiry_min. Empate conta como devolucao do stake, nao como vitoria.
-
-    Custo: evaluate() percorre a serie inteira a cada barra (O(n^2)). Em
-    1200 barras isso ja leva segundos, por isso o endpoint roda em thread.
-    """
-    trades = []
-    i = strategy.MIN_CANDLES
-    while i + expiry_min < len(candles):
-        window = candles[:i + 1]
-        a = strategy.evaluate(window)
-        i += 1
-        if a is None or a.direction == "flat" or a.confidence < min_confidence:
-            continue
-        entry = candles[i - 1].close
-        exit_price = candles[i - 1 + expiry_min].close
-        if abs(exit_price - entry) < 1e-12:
-            outcome, pnl_pct = "tie", 0.0
-        elif (a.direction == "call") == (exit_price > entry):
-            outcome, pnl_pct = "win", payout_pct / 100.0
-        else:
-            outcome, pnl_pct = "loss", -1.0
-        trades.append({
-            "index": i - 1,
-            "ts": candles[i - 1].ts,
-            "direction": a.direction,
-            "confidence": a.confidence,
-            "entry": round(entry, 6),
-            "exit": round(exit_price, 6),
-            "result": outcome,
-            "pnl_pct": pnl_pct,
-        })
-
-    wins = sum(1 for t in trades if t["result"] == "win")
-    losses = sum(1 for t in trades if t["result"] == "loss")
-    ties = sum(1 for t in trades if t["result"] == "tie")
-    decided = wins + losses
-    equity = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    curve = []
-    for t in trades:
-        equity += t["pnl_pct"]
-        peak = max(peak, equity)
-        max_dd = min(max_dd, equity - peak)
-        curve.append(round(equity * 100, 3))
-
-    return {
-        "trades": trades,
-        "count": len(trades),
-        "wins": wins,
-        "losses": losses,
-        "ties": ties,
-        "win_rate": round(wins / decided * 100, 2) if decided else 0.0,
-        "break_even_win_rate": (round(100.0 / (100.0 + payout_pct) * 100, 2)
-                                if payout_pct > 0 else None),
-        "total_return_pct": round(equity * 100, 3),
-        "max_drawdown_pct": round(max_dd * 100, 3),
-        "equity_curve": curve,
-        "expiry_min": expiry_min,
-        "min_confidence": min_confidence,
-        "payout_pct": payout_pct,
-        "disclaimer": ("Backtest sobre dados historicos. Nao e previsao e "
-                       "nao inclui spread, slippage nem latencia de execucao."),
     }

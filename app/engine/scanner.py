@@ -8,6 +8,18 @@ A ordem das operacoes aqui e o que garante integridade:
 Liquidacao usa o preco no instante do vencimento, consultado na mesma fonte
 que gerou o sinal. Se a fonte nao responder, o sinal fica 'open' e e tentado
 de novo -- nunca e fechado com preco inventado.
+
+Ciclo de vida do sinal (ver config.py):
+  1. MEDICAO  -- no ultimo minuto do candle, a confluencia comeca a ser
+                 medida e precisa se manter.
+  2. ALERTA   -- se ela sobrevive ate os ultimos ALERT_WINDOW segundos,
+                 vira alerta. Alerta nao e sinal: nao ha operacao aberta.
+  3. ABERTURA -- o sinal abre na virada exata do candle, com o preco de
+                 fechamento do candle que acabou, e fecha um candle depois.
+
+Cada ativo e avaliado uma vez por prazo (M5, M15). O prazo define o
+timeframe das velas -- M5 analisa velas de 5 minutos. O M1 ficou de fora
+porque a confluencia atual nao separa sinal de ruido em 60 segundos.
 """
 from __future__ import annotations
 
@@ -16,8 +28,10 @@ import logging
 import time
 
 from .. import store
-from ..config import (CONFIDENCE_BANDS, COOLDOWN_SECONDS, LOOKBACK,
-                      MIN_CONFIDENCE, SCAN_INTERVAL, SETTLE_GRACE)
+from ..config import (ALERT_WINDOW_SECONDS, MEASURE_WINDOW_SECONDS,
+                      MIN_CONFIDENCE_BY_EXPIRY, LOOKBACK,
+                      OPEN_GRACE_SECONDS, SCAN_INTERVAL, SETTLE_GRACE,
+                      TIMEFRAMES, cooldown_for)
 from ..feeds.base import Asset
 from ..feeds.registry import FeedRegistry, default_assets
 from ..hub import Hub
@@ -28,13 +42,24 @@ log = logging.getLogger("scanner")
 STRATEGY_NAME = "devhub-confluence-v1"
 
 
+def candle_close_ts(candle_ts: int, timeframe: int) -> int:
+    """Instante em que o candle que ABRIU em `candle_ts` fecha."""
+    return candle_ts + timeframe
+
+
 class Scanner:
     def __init__(self, registry: FeedRegistry, hub: Hub) -> None:
         self.registry = registry
         self.hub = hub
         self.assets: list[Asset] = default_assets()
+        self.expiries: list[int] = sorted(TIMEFRAMES)
+        # chave: "SYMBOL:EXPIRY"
         self._cooldown: dict[str, float] = {}
         self._last_assessment: dict[str, dict] = {}
+        # confluencia medida no ultimo minuto, aguardando confirmacao
+        self._measured: dict[str, dict] = {}
+        # confluencia confirmada, aguardando a virada do candle para abrir
+        self._alerts: dict[str, dict] = {}
         self._prices: dict[str, float] = {}
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -52,16 +77,29 @@ class Scanner:
     # ---------- dados para o dashboard ----------
 
     def snapshot(self) -> dict:
+        now = time.time()
         return {
             "assets": [a.as_dict() for a in self.assets],
             "prices": dict(self._prices),
             "assessments": dict(self._last_assessment),
+            "alerts": {
+                k: {
+                    **v,
+                    "seconds_to_open": round(v["boundary_ts"] - now, 1),
+                }
+                for k, v in self._alerts.items()
+            },
             "feeds": self.registry.status(),
             "last_scan": self.last_scan,
             "errors": dict(self.errors),
+            "timeframes": dict(TIMEFRAMES),
+            "emit_windows": {
+                exp: ALERT_WINDOW_SECONDS for exp in self.expiries},
+            "measure_window": MEASURE_WINDOW_SECONDS,
+            "alert_window": ALERT_WINDOW_SECONDS,
             "confidence_bands": [
-                {"above": minimo, "expiry_min": exp}
-                for minimo, exp in CONFIDENCE_BANDS
+                {"above": MIN_CONFIDENCE_BY_EXPIRY[exp], "expiry_min": exp}
+                for exp in self.expiries
             ],
             "open_signals_count": store.open_signals_count(),
         }
@@ -79,6 +117,7 @@ class Scanner:
             started = time.time()
             try:
                 await self._scan_all()
+                await self._open_due()
                 await self._settle_due()
                 await self.hub.broadcast("tick", self.snapshot())
             except asyncio.CancelledError:
@@ -90,81 +129,199 @@ class Scanner:
 
     async def _scan_all(self) -> None:
         for asset in self.assets:
-            try:
-                await self._scan_one(asset)
-            except Exception as exc:
-                self.errors[asset.symbol] = f"{type(exc).__name__}: {exc}"
-                log.debug("Falha em %s: %s", asset.symbol, exc)
+            for expiry in self.expiries:
+                try:
+                    await self._scan_one(asset, expiry)
+                except Exception as exc:
+                    self.errors[asset.symbol] = (
+                        f"{type(exc).__name__}: {exc}")
+                    log.debug("Falha em %s M%d: %s",
+                              asset.symbol, expiry, exc)
         self.last_scan = time.time()
 
-    async def _scan_one(self, asset: Asset) -> None:
+    async def _scan_one(self, asset: Asset, expiry: int) -> None:
+        """Mede a confluencia e, se ela se mantiver, levanta o alerta.
+
+        Nao abre sinal: quem abre e `_open_due`, na virada do candle.
+        """
+        timeframe = TIMEFRAMES[expiry]
         feed = self.registry.for_asset(asset)
-        candles = await feed.candles(asset, LOOKBACK)
-        if not candles:
+        candles = await feed.candles(asset, LOOKBACK + 1, timeframe)
+        if not candles or len(candles) < strategy.MIN_CANDLES + 2:
             self.errors[asset.symbol] = "sem dados da fonte"
             return
         self.errors.pop(asset.symbol, None)
 
-        live = await feed.price(asset)
-        self._prices[asset.symbol] = live or candles[-1].close
+        current = candles[-1]
+        now = time.time()
+        seconds_to_close = candle_close_ts(current.ts, timeframe) - now
+        key = f"{asset.symbol}:{expiry}"
+        min_conf = MIN_CONFIDENCE_BY_EXPIRY.get(expiry, 100)
 
+        # A avaliacao usa so velas fechadas; `evaluate` descarta a ultima.
         result = strategy.evaluate(candles)
         if result is None:
             return
-        self._last_assessment[asset.symbol] = result.as_dict()
 
-        now = time.time()
-        if result.direction == "flat":
-            return
-        if result.confidence < MIN_CONFIDENCE:
-            return
-        last = self._cooldown.get(asset.symbol, 0.0)
-        if now - last < COOLDOWN_SECONDS:
+        # Fora do ultimo minuto do candle: nao avalia, nao mede, nao mostra.
+        # A varredura SO existe dentro da janela de medicao. Antes disso
+        # qualquer leitura e ruido; depois do fechamento ja e tarde demais.
+        if seconds_to_close > MEASURE_WINDOW_SECONDS or seconds_to_close < -OPEN_GRACE_SECONDS:
+            self._last_assessment.pop(key, None)
+            self._measured.pop(key, None)
             return
 
-        # Verifica se ja existe sinal aberto para este ativo
-        if store.has_open_signal(asset.symbol):
-            log.debug("Pulando %s: ja possui sinal aberto", asset.symbol)
+        phase = ("alerta" if seconds_to_close <= ALERT_WINDOW_SECONDS
+                 else "medindo")
+
+        self._last_assessment[key] = {
+            **result.as_dict(),
+            "expiry_min": expiry,
+            "timeframe_sec": timeframe,
+            "seconds_to_close": round(seconds_to_close, 1),
+            "emit_window": ALERT_WINDOW_SECONDS,
+            "phase": phase,
+        }
+        if seconds_to_close < -OPEN_GRACE_SECONDS:
+            self._measured.pop(key, None)
             return
 
-        expiry = self._pick_expiry(result.confidence)
-        if expiry is None:
+        # Passa o piso? Se nao, a medicao e descartada -- precisa ser
+        # continua, nao um pico isolado no meio do ultimo minuto.
+        if (result.direction == "flat" or result.confidence < min_conf):
+            self._measured.pop(key, None)
             return
-        entry = live or candles[-1].close
-        payload = {
+
+        measured = self._measured.get(key)
+        same_candle = measured is not None and measured["candle_ts"] == current.ts
+        same_dir = same_candle and measured["direction"] == result.direction
+        if not same_dir:
+            # primeira leitura do ultimo minuto, ou o mercado reverteu:
+            # (re)comeca a contagem
+            self._measured[key] = {
+                "direction": result.direction,
+                "confidence": result.confidence,
+                "candle_ts": current.ts,
+                "since": now,
+            }
+            return
+
+        # Medicao sobreviveu ate a janela de alerta?
+        if phase != "alerta" or key in self._alerts:
+            return
+        if store.has_open_signal(asset.symbol, expiry):
+            return
+        if now - self._cooldown.get(key, 0.0) < cooldown_for(expiry):
+            return
+
+        # Reconfirma com dados frescos: o alerta so existe se a confluencia
+        # ainda estiver de pe neste instante, nao dez segundos atras.
+        fresh = await feed.candles(asset, LOOKBACK + 1, timeframe)
+        if not fresh or len(fresh) < strategy.MIN_CANDLES + 2:
+            return
+        check = strategy.evaluate(fresh)
+        if (check is None or check.direction != measured["direction"]
+                or check.confidence < min_conf):
+            self._measured.pop(key, None)
+            return
+
+        boundary = candle_close_ts(current.ts, timeframe)
+        self._alerts[key] = {
             "symbol": asset.symbol,
             "market": asset.market,
             "source": asset.source,
             "verified": asset.verified,
-            "strategy": STRATEGY_NAME,
-            "direction": result.direction,
+            "direction": check.direction,
             "expiry_min": expiry,
-            "entry_price": entry,
-            "confidence": result.confidence,
-            "score": result.score,
-            "reasons": result.reasons,
-            "metrics": result.metrics,
-            "opened_at": now,
-            "expires_at": now + expiry * 60,
+            "timeframe_sec": timeframe,
+            "confidence": check.confidence,
+            "score": check.score,
+            "reasons": check.reasons,
+            "metrics": check.metrics,
+            "boundary_ts": boundary,
+            "expires_at": boundary + expiry * 60,
+            "measured_since": measured["since"],
+            "confirmed_at": now,
         }
-        sig_id = store.insert_signal(payload)
-        self._cooldown[asset.symbol] = now
-        payload["id"] = sig_id
-        payload["status"] = "open"
-        # Rele do banco: e a fonte da verdade, nao o dict em memoria
-        await self.hub.broadcast("signal", payload)
-        log.info("Sinal #%s %s %s conf=%s", sig_id, asset.symbol,
-                 result.direction, result.confidence)
+        await self.hub.broadcast("alert", self._alerts[key])
+        log.info("Alerta %s M%d %s conf=%s -- abre em %ds",
+                 asset.symbol, expiry, check.direction, check.confidence,
+                 max(0, int(boundary - now)))
 
-    @staticmethod
-    def _pick_expiry(confidence: int) -> int | None:
-        """Prazo pelo nivel de confianca. None = nao emite sinal.
+    # ---------- abertura na virada do candle ----------
 
+    async def _open_due(self) -> None:
+        """Abre os alertas confirmados cujo candle ja virou.
+
+        A entrada e o fechamento do candle que acabou de fechar -- o preco
+        exato da virada. Nunca o preco andando depois dela.
         """
-        for minimo, expiracao in CONFIDENCE_BANDS:
-            if confidence >= minimo:
-                return expiracao
-        return None
+        if not self._alerts:
+            return
+        now = time.time()
+        for key in list(self._alerts):
+            alert = self._alerts[key]
+            boundary = alert["boundary_ts"]
+            if boundary > now:
+                continue
+            if now - boundary > OPEN_GRACE_SECONDS:
+                log.warning("Alerta %s expirou sem preco de entrada", key)
+                self._alerts.pop(key, None)
+                self._measured.pop(key, None)
+                continue
+
+            asset = self.asset_by_symbol(alert["symbol"])
+            if asset is None:
+                self._alerts.pop(key, None)
+                continue
+            timeframe = alert["timeframe_sec"]
+            feed = self.registry.for_asset(asset)
+            candles = await feed.candles(asset, LOOKBACK + 2, timeframe)
+            if not candles:
+                continue
+            # o candle que fechou exatamente na virada
+            entry_candle = None
+            for c in candles:
+                if c.ts == boundary - timeframe:
+                    entry_candle = c
+                    break
+            if entry_candle is None:
+                # a fonte ainda nao entregou o candle fechado; tenta de novo
+                continue
+
+            expiry = alert["expiry_min"]
+            if store.has_open_signal(asset.symbol, expiry):
+                self._alerts.pop(key, None)
+                self._measured.pop(key, None)
+                continue
+
+            payload = {
+                "symbol": asset.symbol,
+                "market": asset.market,
+                "source": asset.source,
+                "verified": asset.verified,
+                "strategy": STRATEGY_NAME,
+                "direction": alert["direction"],
+                "expiry_min": expiry,
+                "timeframe_sec": timeframe,
+                "entry_price": entry_candle.close,
+                "confidence": alert["confidence"],
+                "score": alert["score"],
+                "reasons": alert["reasons"],
+                "metrics": alert["metrics"],
+                "opened_at": boundary,
+                "expires_at": boundary + expiry * 60,
+            }
+            sig_id = store.insert_signal(payload)
+            self._cooldown[key] = now
+            self._alerts.pop(key, None)
+            self._measured.pop(key, None)
+            payload["id"] = sig_id
+            payload["status"] = "open"
+            await self.hub.broadcast("signal", payload)
+            log.info("Sinal #%s %s M%d %s conf=%s entrada=%s",
+                     sig_id, asset.symbol, expiry, alert["direction"],
+                     alert["confidence"], entry_candle.close)
 
     # ---------- liquidacao ----------
 

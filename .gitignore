@@ -17,43 +17,37 @@ sdist/
 var/
 wheels/
 pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Virtual Environment
+# Ambiente
+.env
+.venv/
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
 
-# IDEs
+# Banco de sinais: dado de execucao, nao de repositorio.
+# O historico e local a cada maquina e nao deve ser versionado.
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.db.bak.*
+data/*.log
+app/*.db
+# Capturas de payload da corretora: contem user_id, balance_id e
+# saldo da conta. Nunca devem sair da maquina.
+data/*.json
+tools/*_debug.py
+
+# Logs e temporarios
+*.log
+*.tmp
+_p*.txt
+
+# Editor / SO
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# Database & Data
-*.db
-*.db-shm
-*.db-wal
-data/
-
-# Logs
-*.log
-server.log
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Claude
-.claude/
-# Segredos
-.env
-.env.*
-!.env.example

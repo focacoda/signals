@@ -17,7 +17,6 @@
     <button class="tab active" data-view="live">Ao vivo</button>
     <button class="tab" data-view="history">Histórico</button>
     <button class="tab" data-view="stats">Track record</button>
-    <button class="tab" data-view="backtest">Backtest</button>
     <button class="tab" data-view="tools">Calculadoras</button>
     <button class="tab" data-view="api">API</button>
   </nav>
@@ -71,19 +70,6 @@
       Este número é calculado sobre <strong>todos</strong> os sinais gravados
       antes do resultado. Não há filtro para excluir perdas.
     </div>
-  </section>
-
-  <!-- BACKTEST -->
-  <section id="view-backtest" class="view">
-    <form class="panel" id="backtestForm">
-      <label>Ativo <select id="btSymbol"></select></label>
-      <label>Expiração (min) <input id="btExpiry" type="number" value="5" min="1" max="60"></label>
-      <label>Confiança mínima <input id="btConf" type="number" value="60" min="1" max="99"></label>
-      <label>Payout % <input id="btPayout" type="number" value="85" step="0.5"></label>
-      <label>Barras <input id="btBars" type="number" value="1000" min="200" max="5000" step="100"></label>
-      <button class="btn primary" type="submit">Rodar backtest</button>
-    </form>
-    <div id="backtestOut"></div>
   </section>
 
   <!-- CALCULADORAS -->
@@ -149,6 +135,6 @@
   </section>
 </main>
 
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>
