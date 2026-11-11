@@ -1,11 +1,12 @@
 """Conector IQ Option via iqoptionapi (fork lukefeix).
 
-Login real por e-mail/senha, velas reais dos ativos, em qualquer um dos
-timeframes operados (M1, M5, M15).
+Login real por e-mail/senha, velas reais dos ativos em qualquer timeframe
+operado (M5, M15). Cobre forex, cripto e OTC -- todos pela mesma sessao.
 
 O mapa de ativos -> codigo numerico NAO e escrito a mao: a cada sessao ele e
-lido do proprio servidor (`get_ALL_Binary_ACTIVES_OPCODE`). A tabela estatica
-da biblioteca envelhece e ja estava errada em varios pares.
+lido do proprio servidor (`get_ALL_Binary_ACTIVES_OPCODE`), e a lista de
+simbolos vem do catalogo de ativos. A tabela estatica da biblioteca envelhece
+e ja estava errada em varios pares.
 """
 from __future__ import annotations
 
@@ -25,18 +26,18 @@ _VENDOR = Path(__file__).resolve().parents[2] / "vendor" / "iqoptionapi-master"
 if str(_VENDOR) not in sys.path:
     sys.path.insert(0, str(_VENDOR))
 
-# Simbolos operados. O codigo numerico vem do servidor na hora do login.
-SYMBOLS = (
-    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF",
-    "EURGBP", "EURJPY", "GBPJPY", "NZDUSD", "BTCUSD", "ETHUSD",
-)
-
-# Fallback usado apenas se o servidor nao devolver o mapa. Conferido contra
-# a lista de ativos da IQ; serve para o sistema nao ficar cego.
+# Codigos usados enquanto o servidor nao respondeu. Cobrem so os pares que
+# ja existiam antes; o mapa real vem do servidor no login e substitui isto.
 _FALLBACK_IDS = {
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5,
     "USDJPY": 6, "NZDUSD": 8, "USDCHF": 72, "AUDUSD": 99, "USDCAD": 100,
     "BTCUSD": 816, "ETHUSD": 818,
+    # OTC (nomes com hifen, como a IQ usa)
+    "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78,
+    "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
+    "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDUSD-OTC": 2111,
+    "USDCAD-OTC": 2112, "ETHUSD-OTC": 1941,
+    "XAUUSD-OTC": 1857, "XAGUSD-OTC": 1858,
 }
 
 
@@ -114,7 +115,9 @@ class IQFeed:
 
     async def candles(self, asset, limit: int = 120,
                       timeframe: int = 60) -> list[Candle]:
-        symbol = getattr(asset, "symbol", asset)
+        # Usa o nome exato da corretora (ex: "EURUSD-OTC") se disponivel;
+        # senao fallback para o simbolo padrao do sistema.
+        symbol = getattr(asset, "canonical", None) or getattr(asset, "symbol", asset)
         if not await self._connect():
             return []
         if symbol not in self._ids:
@@ -158,7 +161,10 @@ class IQFeed:
         inexistente. Liquidar com preco defasado e melhor que nao liquidar,
         e o erro do M1 e pequeno frente ao vencimento que esta sendo medido.
         """
-        symbol = getattr(asset, "symbol", asset)
+        # Mesma regra de `candles`: o nome na corretora e o `canonical`
+        # ("EURUSD-OTC"). Usar `symbol` ("EURUSD_OTC") aqui nunca acerta.
+        symbol = getattr(asset, "canonical", None) or getattr(
+            asset, "symbol", asset)
         if not await self._connect():
             return None
         api = self._api

@@ -1,13 +1,13 @@
 """Catalogo de ativos e resolucao de feed por ativo.
 
-Fonte unica: IQ Option. A Binance foi removida; cripto agora tambem vem da
-IQ Option, entao todo ativo do sistema usa a mesma sessao autenticada.
+Fonte unica: IQ Option. Forex, cripto e OTC vem todos da mesma sessao
+autenticada -- inclusive o OTC, que antes era gerado por nos e agora usa
+as velas reais da corretora.
 """
 from __future__ import annotations
 
 from .base import Asset, Feed
 from .iq import IQFeed
-from .otc_sim import OTCSimFeed
 
 
 def default_assets() -> list[Asset]:
@@ -32,22 +32,30 @@ def default_assets() -> list[Asset]:
             symbol=sym, name=name, market="forex", source="iq",
             canonical=sym, payout=84, verified=True))
 
-    # OTC sintetico: nao auditavel por terceiro, marcado como tal
-    for sym, name in [
-        ("EURUSD_OTC", "Euro / Dolar OTC"),
-        ("GBPUSD_OTC", "Libra / Dolar OTC"),
-        ("USDJPY_OTC", "Dolar / Iene OTC"),
-        ("AUDUSD_OTC", "Dolar Aus / Dolar OTC"),
-        ("USDCAD_OTC", "Dolar / Canadense OTC"),
-        ("NZDUSD_OTC", "Dolar NZ / Dolar OTC"),
-        ("EURJPY_OTC", "Euro / Iene OTC"),
-        ("GBPJPY_OTC", "Libra / Iene OTC"),
-        ("XAUUSD_OTC", "Ouro / Dolar OTC"),
-        ("XAGUSD_OTC", "Prata / Dolar OTC"),
+    # OTC: ativos da PROPRIA IQ Option, com velas reais da corretora.
+    #
+    # O nome na IQ usa hifen ("EURUSD-OTC"), por isso `canonical` guarda o
+    # nome da corretora e `symbol` mantem o formato do sistema. Nao ha mais
+    # preco gerado por nos: o que aparece na tela e o que a IQ negocia, e o
+    # resultado de um sinal sai do fechamento real da vela.
+    for sym, canonical, name in [
+        ("EURUSD_OTC", "EURUSD-OTC", "Euro / Dolar OTC"),
+        ("GBPUSD_OTC", "GBPUSD-OTC", "Libra / Dolar OTC"),
+        ("USDJPY_OTC", "USDJPY-OTC", "Dolar / Iene OTC"),
+        ("AUDUSD_OTC", "AUDUSD-OTC", "Dolar Aus / Dolar OTC"),
+        ("USDCAD_OTC", "USDCAD-OTC", "Dolar / Canadense OTC"),
+        ("NZDUSD_OTC", "NZDUSD-OTC", "Dolar NZ / Dolar OTC"),
+        ("EURJPY_OTC", "EURJPY-OTC", "Euro / Iene OTC"),
+        ("GBPJPY_OTC", "GBPJPY-OTC", "Libra / Iene OTC"),
+        ("EURGBP_OTC", "EURGBP-OTC", "Euro / Libra OTC"),
+        ("USDCHF_OTC", "USDCHF-OTC", "Dolar / Franco OTC"),
+        ("ETHUSD_OTC", "ETHUSD-OTC", "Ethereum OTC"),
+        ("XAUUSD_OTC", "XAUUSD-OTC", "Ouro / Dolar OTC"),
+        ("XAGUSD_OTC", "XAGUSD-OTC", "Prata / Dolar OTC"),
     ]:
         assets.append(Asset(
-            symbol=sym, name=name, market="otc", source="sim_otc",
-            canonical=sym, payout=82, verified=False))
+            symbol=sym, name=name, market="otc", source="iq",
+            canonical=canonical, payout=82, verified=True))
 
     return assets
 
@@ -55,21 +63,15 @@ def default_assets() -> list[Asset]:
 class FeedRegistry:
     def __init__(self) -> None:
         self.iq = IQFeed()
-        self.otc = OTCSimFeed()
         self._by_name: dict[str, Feed] = {
             "iq": self.iq,
-            "sim_otc": self.otc,
         }
 
     def for_asset(self, asset: Asset) -> Feed:
         return self._by_name[asset.source]
 
     def status(self) -> dict:
-        return {
-            "iq": self.iq.status(),
-            "sim_otc": {"available": True, "configured": True},
-        }
+        return {"iq": self.iq.status()}
 
     async def close(self) -> None:
         await self.iq.close()
-        await self.otc.close()

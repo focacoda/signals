@@ -120,9 +120,8 @@ function renderLive() {
 
   const feeds = s.feeds || {};
   const parts = [];
-  if (feeds.iq?.available) parts.push('IQ Option');
-  if (feeds.sim_otc?.available) parts.push('OTC sintético');
-  $('#feedTag').textContent = parts.length ? 'fontes: ' + parts.join(' · ') : 'sem feeds';
+  if (feeds.iq?.available) parts.push('IQ Option (forex · cripto · OTC)');
+  $('#feedTag').textContent = parts.length ? 'fonte: ' + parts.join(' · ') : 'sem fonte';
 
   const open = state.open.length;
   const kpis = [

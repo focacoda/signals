@@ -209,7 +209,9 @@ class Scanner:
         # Medicao sobreviveu ate a janela de alerta?
         if phase != "alerta" or key in self._alerts:
             return
-        if store.has_open_signal(asset.symbol, expiry):
+        # So abre se nao houver NENHUM sinal aberto neste ativo (qualquer prazo).
+        # Isso evita que M5 e M15 disparem ao mesmo tempo no mesmo par.
+        if store.has_open_signal(asset.symbol):
             return
         if now - self._cooldown.get(key, 0.0) < cooldown_for(expiry):
             return
@@ -290,7 +292,9 @@ class Scanner:
                 continue
 
             expiry = alert["expiry_min"]
-            if store.has_open_signal(asset.symbol, expiry):
+            # Um sinal aberto por ativo, qualquer prazo: dois no mesmo par
+            # (um M5 e um M15) seriam duas apostas no mesmo preco.
+            if store.has_open_signal(asset.symbol):
                 self._alerts.pop(key, None)
                 self._measured.pop(key, None)
                 continue
@@ -326,15 +330,48 @@ class Scanner:
     # ---------- liquidacao ----------
 
     async def _settle_due(self) -> None:
-        due = store.pending_settlement(time.time() - SETTLE_GRACE)
+        """Liquida pelo fechamento da vela no instante do vencimento.
+
+        O preco de saida NAO e o preco corrente: e o fechamento da vela cujo
+        fim coincide com `expires_at`. Duas razoes:
+          - o preco corrente pode estar defasado ou ausente no exato instante
+            do vencimento, e liquidar com ele mede o momento errado;
+          - se a fonte nao responder, inventar um preco (empate artificial)
+            contamina o track record com resultados que nao aconteceram.
+
+        Quando o candle de vencimento ainda nao chegou, o sinal continua
+        aberto e e tentado de novo no proximo ciclo. Nada e fechado sem o
+        preco real.
+        """
+        now = time.time()
+        due = store.pending_settlement(now - SETTLE_GRACE)
         for row in due:
             asset = self.asset_by_symbol(row["symbol"])
             if asset is None:
                 continue
             feed = self.registry.for_asset(asset)
-            exit_price = await feed.price(asset)
-            if exit_price is None:
+            timeframe = TIMEFRAMES.get(int(row["expiry_min"]), 60)
+            expires_at = float(row["expires_at"])
+
+            # A vela que fecha em `expires_at` abriu `timeframe` antes.
+            candles = await feed.candles(asset, LOOKBACK + 2, timeframe)
+            exit_candle = None
+            for c in candles or []:
+                if candle_close_ts(c.ts, timeframe) == int(expires_at):
+                    exit_candle = c
+                    break
+
+            if exit_candle is None:
+                # A fonte ainda nao publicou a vela de vencimento. Mantem
+                # aberto e tenta no proximo ciclo -- mas nao para sempre:
+                # passado o limite, o sinal e anulado em vez de ficar preso.
+                if now - expires_at > SETTLE_GRACE * 20:
+                    store.settle(row["id"], "void", None, now)
+                    log.warning("Sinal #%s anulado: sem vela de vencimento",
+                                row["id"])
                 continue
+
+            exit_price = float(exit_candle.close)
             entry = float(row["entry_price"])
             direction = row["direction"]
             if abs(exit_price - entry) < 1e-12:
@@ -343,7 +380,7 @@ class Scanner:
                 outcome = "win" if exit_price > entry else "loss"
             else:
                 outcome = "win" if exit_price < entry else "loss"
-            store.settle(row["id"], outcome, exit_price, time.time())
+            store.settle(row["id"], outcome, exit_price, now)
             await self.hub.broadcast("settled", {
                 "id": row["id"], "symbol": row["symbol"],
                 "direction": direction, "entry_price": entry,

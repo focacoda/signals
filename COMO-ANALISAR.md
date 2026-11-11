@@ -66,13 +66,12 @@ Cada card de ativo mostra:
 | ▲ CALL / ▼ PUT | direção que a confluência de indicadores aponta |
 | `NN% confiança` | força do consenso, já penalizada por volatilidade baixa |
 | `auditável` | a fonte permite que terceiro confira o preço de fechamento |
-| `não auditável` | preço gerado por nós ou pela corretora — não conferível |
 | motivos | **por que** o sinal foi emitido, em texto |
 
 Regra prática: **confiança 100% quase sempre significa mercado travado**, não
-qualidade. Quando a volatilidade cai, o `vol_factor` reduz o score — mas nos
-ativos OTC sintéticos o gerador pode ficar muito estável e a confiança
-satura. Compare com o RSI e a inclinação mostrados para julgar.
+qualidade. Quando a volatilidade cai, o `vol_factor` reduz o score. Em OTC a
+volatilidade é baixa por natureza, então a confiança satura com facilidade —
+compare com o RSI e a inclinação mostrados antes de julgar.
 
 ## 3. Aba "Track record" — o número que importa
 
@@ -144,18 +143,25 @@ Ou duplo clique em `consultar.bat`.
 | Margem | margem exigida por alavancagem |
 | Plano de risco | quantos trades até estourar limites de prop firm |
 
-## 7. Fontes de dados
+## 7. Fonte de dados
 
-| Fonte | Status | Auditável |
+Fonte única: **IQ Option**, pela mesma sessão autenticada.
+
+| Mercado | Ativos | Velas |
 |---|---|---|
-| IQ Option (forex + cripto) | ativa, requer login | **sim** |
-| IQ Option (forex) | requer `IQ_EMAIL` e `IQ_PASSWORD` | sim |
-| OTC sintético | ativa, preço gerado por nós | **não** |
+| Forex | EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, NZDUSD | IQ |
+| Cripto | BTCUSD, ETHUSD | IQ |
+| OTC | 13 pares (EURUSD-OTC, GBPUSD-OTC, XAUUSD-OTC, ...) | IQ |
 
-O OTC sintético é determinístico: `price_at(symbol, minute)` em
-`app/feeds/otc_sim.py` reproduz exatamente o mesmo preço em qualquer
-máquina. Serve para desenvolvimento, **não para operar** — não representa
-nenhuma corretora real.
+O OTC **não é mais simulado**. Antes os ativos `_OTC` usavam preços
+gerados por nós (`app/feeds/otc_sim.py`, removido): serviam para estudar o
+motor, mas eram inúteis para operar, porque o preço não era o da
+corretora. Agora cada `SYMBOL_OTC` aponta para o ativo real da IQ
+(`canonical` = `"EURUSD-OTC"`, com hífen), e tanto a análise quanto o
+resultado de cada sinal saem do fechamento real da vela.
+
+Consequência prática: tudo que aparece no dashboard é auditável contra a
+plataforma da corretora.
 
 ### Ativar a IQ Option
 
@@ -163,8 +169,8 @@ nenhuma corretora real.
 set IQ_EMAIL=seu@email.com && set IQ_PASSWORD=suasenha && python run.py
 ```
 
-Se a conexão falhar, o dashboard mostra a fonte real usada e o erro no
-`/api/health`. O sistema continua funcionando com as outras fontes.
+Sem credenciais, ou se a conexão falhar, o dashboard fica sem fonte e
+mostra o erro em `/api/health`. Não há mais feed alternativo.
 
 ## 8. API
 

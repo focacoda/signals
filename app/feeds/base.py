@@ -12,7 +12,7 @@ class Asset:
     symbol: str          # nome canonico usado no sistema, ex "EURUSD"
     name: str            # rotulo de exibicao
     market: str          # "forex" | "crypto" | "otc"
-    source: str          # "iq" | "binance" | "sim"
+    source: str          # "iq" (unica fonte; forex, cripto e OTC)
     canonical: str       # id na fonte, ex "EURUSD" ou "BTCUSDT"
     payout: int = 85     # payout % usado nas calculadoras (binarias)
     verified: bool = True  # resultado auditavel por terceiro?
